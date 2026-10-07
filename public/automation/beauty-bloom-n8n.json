@@ -1,0 +1,217 @@
+{
+  "name": "Beauty Bloom — confirmations, reminders & repeat visits",
+  "nodes": [
+    {
+      "id": "13d83e14-41f7-41b2-93b4-13c4b9409f44",
+      "name": "Every 5 minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "e9b26aeb-4cb9-4edc-9b73-72189389f212",
+      "name": "Claim queued messages",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.BEAUTY_BLOOM_URL + \"/api/integration/claim\" }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $vars.BEAUTY_BLOOM_TOKEN }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 20000
+        }
+      }
+    },
+    {
+      "id": "453aebd0-bb9e-43de-ae2d-6b0f37484c18",
+      "name": "Split jobs",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "fieldToSplitOut": "jobs",
+        "options": {}
+      }
+    },
+    {
+      "id": "d1c5f6ff-99b6-4378-8abb-f126651904db",
+      "name": "Send email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "fromEmail": "={{ $vars.BEAUTY_BLOOM_FROM }}",
+        "toEmail": "={{ $json.email }}",
+        "subject": "={{ \"Beauty Bloom · \" + ($json.kind === \"reminder\" ? \"Напоминание о визите\" : $json.kind === \"rebook\" ? \"Будем рады новой встрече\" : \"Ваша запись\") }}",
+        "emailFormat": "text",
+        "text": "={{ $json.message }}",
+        "options": {}
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "8ba9dc5a-fb8a-4e48-8dfb-461b7ddaf9d9",
+      "name": "Acknowledge success",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        -120
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.BEAUTY_BLOOM_URL + \"/api/integration/ack\" }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $vars.BEAUTY_BLOOM_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({id: $(\"Split jobs\").item.json.id, lease: $(\"Split jobs\").item.json.lease, success: true}) }}",
+        "options": {
+          "timeout": 20000
+        }
+      }
+    },
+    {
+      "id": "5d1e8399-c370-4ca2-b751-0fb618b6a436",
+      "name": "Acknowledge failure",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        120
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.BEAUTY_BLOOM_URL + \"/api/integration/ack\" }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ \"Bearer \" + $vars.BEAUTY_BLOOM_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({id: $(\"Split jobs\").item.json.id, lease: $(\"Split jobs\").item.json.lease, success: false, error: String($json.error?.message || $json.error || \"SMTP delivery failed\").slice(0,500)}) }}",
+        "options": {
+          "timeout": 20000
+        }
+      }
+    },
+    {
+      "id": "94eb253d-5930-4a83-8aa1-2758e70f64c6",
+      "name": "Setup instructions",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        240
+      ],
+      "parameters": {
+        "content": "## Beauty Bloom CRM\n1. Define variables BEAUTY_BLOOM_URL, BEAUTY_BLOOM_TOKEN, BEAUTY_BLOOM_FROM.\n2. Attach your SMTP credential to Send email.\n3. Test with your own controlled inbox, then activate.\nPublic portfolio demo uses fictional data. Do not send to example.com seed contacts.\nTasks have 10-minute leases and max. 5 attempts. SMTP is at-least-once: a crash after delivery but before acknowledgment can duplicate a message. Use an idempotent provider for stronger guarantees.",
+        "height": 250,
+        "width": 650
+      }
+    }
+  ],
+  "connections": {
+    "Every 5 minutes": {
+      "main": [
+        [
+          {
+            "node": "Claim queued messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim queued messages": {
+      "main": [
+        [
+          {
+            "node": "Split jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split jobs": {
+      "main": [
+        [
+          {
+            "node": "Send email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send email": {
+      "main": [
+        [
+          {
+            "node": "Acknowledge success",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Acknowledge failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Almaty"
+  },
+  "pinData": {},
+  "tags": []
+}
