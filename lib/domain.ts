@@ -54,6 +54,7 @@ export type Job = {
   appointment_id: string;
   kind: string;
   due_at: number;
+  created_at: number;
   status: string;
   message: string;
   attempts: number;
@@ -79,6 +80,10 @@ export type StudioData = {
     reminder: number;
     rebook: number;
     integrationReady: boolean;
+    deliveryMode: "demo" | "test";
+    testAvailable: boolean;
+    testEmail: string | null;
+    testStartedAt: number | null;
   };
   expiresAt: number;
 };

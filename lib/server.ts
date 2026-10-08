@@ -372,6 +372,41 @@ async function session(
 
 const appointmentQuery =
   "SELECT a.*,c.name client_name,c.phone client_phone,c.email client_email,m.name master_name,m.color,m.category FROM appointments a JOIN clients c ON c.id=a.client_id JOIN masters m ON m.id=a.master_id WHERE a.workspace_id=?";
+function testConfiguration() {
+  const operator =
+    env.BEAUTY_BLOOM_TEST_OPERATOR_EMAIL?.trim().toLowerCase() ?? "";
+  const recipient = env.BEAUTY_BLOOM_TEST_RECIPIENT?.trim().toLowerCase() ?? "";
+  return {
+    operator,
+    recipient,
+    configured: !!operator && z.string().email().safeParse(recipient).success,
+  };
+}
+async function testOperator(c: Context) {
+  const config = testConfiguration(),
+    user = await getChatGPTUser();
+  if (
+    !config.configured ||
+    !user ||
+    user.email.toLowerCase() !== config.operator
+  )
+    return false;
+  const owned = await first(
+    "SELECT id FROM workspaces WHERE id=? AND owner=?",
+    c.workspace_id,
+    user.userId,
+  );
+  return !!owned;
+}
+async function requireTestOperator(c: Context) {
+  admin(c);
+  if (!(await testOperator(c)))
+    throw new ApiError(
+      403,
+      "Тестовая почта доступна только вошедшему владельцу приложения",
+    );
+}
+
 async function bootstrap(c: Context) {
   const w = c.workspace_id;
   const masters = (
@@ -399,10 +434,13 @@ async function bootstrap(c: Context) {
     reminder: number;
     rebook: number;
     integration_hash: string | null;
+    delivery_mode: "demo" | "test";
+    test_started_at: number | null;
   }>(
-    "SELECT confirmation,reminder,rebook,integration_hash FROM workspaces WHERE id=?",
+    "SELECT confirmation,reminder,rebook,integration_hash,delivery_mode,test_started_at FROM workspaces WHERE id=?",
     w,
   );
+  const canTest = c.role === "admin" && (await testOperator(c));
   return {
     today: dateInAlmaty(),
     now: Date.now(),
@@ -436,6 +474,10 @@ async function bootstrap(c: Context) {
       reminder: settings?.reminder ?? 1,
       rebook: settings?.rebook ?? 1,
       integrationReady: !!settings?.integration_hash,
+      deliveryMode: settings?.delivery_mode ?? "demo",
+      testAvailable: canTest,
+      testEmail: canTest ? testConfiguration().recipient : null,
+      testStartedAt: settings?.test_started_at ?? null,
     },
   };
 }
@@ -916,6 +958,15 @@ async function mutate(c: Context, path: string, body: unknown) {
   }
   if (path === "automation/demo") {
     admin(c);
+    const mode = await first<{ delivery_mode: string }>(
+      "SELECT delivery_mode FROM workspaces WHERE id=?",
+      c.workspace_id,
+    );
+    if (mode?.delivery_mode === "test")
+      throw new ApiError(
+        409,
+        "Приостановите тестовую отправку перед демо-проверкой",
+      );
     const w = await first<Record<string, number>>(
       "SELECT confirmation,reminder,rebook FROM workspaces WHERE id=?",
       c.workspace_id,
@@ -934,6 +985,43 @@ async function mutate(c: Context, path: string, body: unknown) {
       `Демо-проверка автоматизаций: ${result.meta.changes} уведомлений. Внешние сообщения не отправлялись`,
     );
     return { count: result.meta.changes };
+  }
+  if (path === "automation/test-mode") {
+    await requireTestOperator(c);
+    const { enabled } = z.object({ enabled: z.boolean() }).parse(body);
+    await statement(
+      "UPDATE workspaces SET delivery_mode=?,test_started_at=CASE WHEN ?=1 THEN COALESCE(test_started_at,?) ELSE test_started_at END WHERE id=?",
+      enabled ? "test" : "demo",
+      +enabled,
+      Date.now(),
+      c.workspace_id,
+    ).run();
+    await log(
+      c,
+      enabled
+        ? "Включена тестовая отправка только на разрешённый адрес"
+        : "Тестовая отправка приостановлена",
+    );
+    return { ok: true };
+  }
+  if (path === "automation/test-ready") {
+    await requireTestOperator(c);
+    const { id } = z.object({ id: z.string() }).parse(body),
+      config = testConfiguration();
+    const result = await statement(
+      `UPDATE jobs SET due_at=? WHERE workspace_id=? AND id=? AND kind IN ('reminder','rebook') AND status IN ('pending','failed') AND attempts<5 AND EXISTS (SELECT 1 FROM workspaces w JOIN appointments a ON a.id=jobs.appointment_id JOIN clients c ON c.id=a.client_id WHERE w.id=jobs.workspace_id AND w.delivery_mode='test' AND jobs.created_at>=w.test_started_at AND lower(c.email)=? AND c.consent=1 AND ((jobs.kind='reminder' AND a.status='confirmed') OR (jobs.kind='rebook' AND a.status='completed')))`,
+      Date.now(),
+      c.workspace_id,
+      id,
+      config.recipient,
+    ).run();
+    if (!result.meta.changes)
+      throw new ApiError(409, "Эта задача недоступна для ускоренного теста");
+    await log(
+      c,
+      "Уведомление поставлено в очередь сейчас для проверки доставки",
+    );
+    return { ok: true };
   }
   if (path === "integration/key") {
     admin(c);
@@ -976,28 +1064,40 @@ async function integration(req: Request, path: string) {
     confirmation: number;
     reminder: number;
     rebook: number;
+    delivery_mode: string;
+    test_started_at: number | null;
   }>(
-    "SELECT id,confirmation,reminder,rebook FROM workspaces WHERE integration_hash=?",
+    "SELECT id,confirmation,reminder,rebook,delivery_mode,test_started_at FROM workspaces WHERE integration_hash=?",
     await hash(token),
   );
   if (!workspace) throw new ApiError(401, "Токен интеграции недействителен");
   if (path === "integration/claim") {
+    const config = testConfiguration();
+    if (
+      !config.configured ||
+      workspace.delivery_mode !== "test" ||
+      !workspace.test_started_at
+    )
+      return { mode: "demo", jobs: [] };
     const lease = uuid(),
       now = Date.now();
     await statement(
-      `UPDATE jobs SET lease=?,lease_until=?,status='processing',attempts=attempts+1 WHERE id IN (SELECT j.id FROM jobs j JOIN appointments a ON a.id=j.appointment_id JOIN clients c ON c.id=a.client_id WHERE j.workspace_id=? AND j.due_at<=? AND j.attempts<5 AND (j.status IN ('pending','failed') OR (j.status='processing' AND j.lease_until<?)) AND c.consent=1 AND c.email!='' AND ((j.kind='rebook' AND a.status='completed' AND ?=1) OR (j.kind='confirmation' AND a.status='confirmed' AND ?=1) OR (j.kind='reminder' AND a.status='confirmed' AND ?=1)) ORDER BY j.due_at LIMIT 20)`,
+      `UPDATE jobs SET lease=?,lease_until=?,status='processing',attempts=attempts+1 WHERE id IN (SELECT j.id FROM jobs j JOIN appointments a ON a.id=j.appointment_id JOIN clients c ON c.id=a.client_id WHERE j.workspace_id=? AND j.due_at<=? AND j.attempts<5 AND (j.status IN ('pending','failed') OR (j.status='processing' AND j.lease_until<?)) AND c.consent=1 AND lower(c.email)=? AND j.created_at>=? AND ((j.kind='rebook' AND a.status='completed' AND ?=1) OR (j.kind='confirmation' AND a.status='confirmed' AND ?=1) OR (j.kind='reminder' AND a.status='confirmed' AND ?=1)) ORDER BY j.due_at LIMIT 20)`,
       lease,
       now + 600000,
       workspace.id,
       now,
       now,
+      config.recipient,
+      workspace.test_started_at,
       workspace.rebook,
       workspace.confirmation,
       workspace.reminder,
     ).run();
     return {
+      mode: "test",
       jobs: await rows(
-        "SELECT j.id,j.kind,j.message,j.lease,c.email FROM jobs j JOIN appointments a ON a.id=j.appointment_id JOIN clients c ON c.id=a.client_id WHERE j.workspace_id=? AND j.lease=?",
+        "SELECT j.id,j.kind,'[ТЕСТ Beauty Bloom] ' || j.message AS message,j.lease,c.email FROM jobs j JOIN appointments a ON a.id=j.appointment_id JOIN clients c ON c.id=a.client_id WHERE j.workspace_id=? AND j.lease=?",
         workspace.id,
         lease,
       ),
@@ -1013,7 +1113,7 @@ async function integration(req: Request, path: string) {
       })
       .parse(await req.json());
     const result = await statement(
-      `UPDATE jobs SET status=?,finished_at=?,error=?,lease=NULL,lease_until=NULL,due_at=? WHERE workspace_id=? AND id=? AND lease=? AND status='processing'`,
+      `UPDATE jobs SET status=?,finished_at=?,error=?,lease=NULL,lease_until=NULL,due_at=? WHERE workspace_id=? AND id=? AND lease=? AND status='processing' AND lease_until>=?`,
       v.success ? "sent" : "failed",
       v.success ? Date.now() : null,
       v.success ? null : (v.error ?? "Ошибка отправки"),
@@ -1021,6 +1121,7 @@ async function integration(req: Request, path: string) {
       workspace.id,
       v.id,
       v.lease,
+      Date.now(),
     ).run();
     if (!result.meta.changes)
       throw new ApiError(409, "Задача уже обработана или срок обработки истёк");
@@ -1054,6 +1155,10 @@ export async function handle(req: Request) {
           throw new ApiError(404, "Студия не найдена");
         const publicContext = { ...c, workspace_id: target, role: "customer" };
         if (req.method === "GET") {
+          const publicSettings = await first<{ delivery_mode: string }>(
+            "SELECT delivery_mode FROM workspaces WHERE id=?",
+            target,
+          );
           const masters = (
             await rows<Omit<Master, "days"> & { days: string }>(
               "SELECT * FROM masters WHERE workspace_id=? AND active=1 ORDER BY rowid",
@@ -1064,6 +1169,9 @@ export async function handle(req: Request) {
             today: dateInAlmaty(),
             now: Date.now(),
             workspaceId: target,
+            testBooking:
+              publicSettings?.delivery_mode === "test" &&
+              testConfiguration().configured,
             masters,
             services: await rows(
               "SELECT * FROM services WHERE workspace_id=? AND active=1 ORDER BY rowid",
@@ -1085,9 +1193,19 @@ export async function handle(req: Request) {
           if ((count?.n ?? 0) >= 50)
             throw new ApiError(429, "Достигнут дневной лимит демо-записей");
           const body = (await req.json()) as { client?: { email?: string } };
+          const targetSettings = await first<{ delivery_mode: string }>(
+            "SELECT delivery_mode FROM workspaces WHERE id=?",
+            target,
+          );
+          const isTestAddress =
+            targetSettings?.delivery_mode === "test" &&
+            testConfiguration().configured &&
+            body.client?.email?.trim().toLowerCase() ===
+              testConfiguration().recipient;
           if (
             body?.client?.email &&
-            !String(body.client.email).endsWith("@example.com")
+            !String(body.client.email).endsWith("@example.com") &&
+            !isTestAddress
           )
             throw new ApiError(
               400,

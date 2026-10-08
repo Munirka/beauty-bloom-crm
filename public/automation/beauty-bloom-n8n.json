@@ -3,22 +3,54 @@
   "nodes": [
     {
       "id": "13d83e14-41f7-41b2-93b4-13c4b9409f44",
-      "name": "Every 5 minutes",
+      "name": "Every 20 minutes",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
-      "position": [
-        0,
-        0
-      ],
+      "position": [0, 160],
       "parameters": {
         "rule": {
           "interval": [
             {
               "field": "minutes",
-              "minutesInterval": 5
+              "minutesInterval": 20
             }
           ]
         }
+      },
+      "disabled": true
+    },
+    {
+      "id": "e9871d1b-918f-4c87-89a9-cb15f68cc36a",
+      "name": "Run test manually",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [0, -80],
+      "parameters": {}
+    },
+    {
+      "id": "5802270b-02b7-4131-aa71-2808b5a51554",
+      "name": "Studio configuration",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [220, -80],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "bb2fefe5-b3a3-487a-9045-3a0b94a5f27c",
+              "name": "crmUrl",
+              "value": "https://beauty-bloom-crm.angrymunir.chatgpt.site",
+              "type": "string"
+            },
+            {
+              "id": "da3df341-8a36-4f0e-a77a-ba0d51eb2371",
+              "name": "fromEmail",
+              "value": "",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
       }
     },
     {
@@ -26,25 +58,15 @@
       "name": "Claim queued messages",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [
-        220,
-        0
-      ],
+      "position": [440, 0],
       "parameters": {
         "method": "POST",
-        "url": "={{ $vars.BEAUTY_BLOOM_URL + \"/api/integration/claim\" }}",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Authorization",
-              "value": "={{ \"Bearer \" + $vars.BEAUTY_BLOOM_TOKEN }}"
-            }
-          ]
-        },
+        "url": "={{ $(\"Studio configuration\").first().json.crmUrl + \"/api/integration/claim\" }}",
         "options": {
           "timeout": 20000
-        }
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
       }
     },
     {
@@ -52,10 +74,7 @@
       "name": "Split jobs",
       "type": "n8n-nodes-base.splitOut",
       "typeVersion": 1,
-      "position": [
-        440,
-        0
-      ],
+      "position": [660, 0],
       "parameters": {
         "fieldToSplitOut": "jobs",
         "options": {}
@@ -66,14 +85,11 @@
       "name": "Send email",
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 2.1,
-      "position": [
-        660,
-        0
-      ],
+      "position": [880, 0],
       "parameters": {
-        "fromEmail": "={{ $vars.BEAUTY_BLOOM_FROM }}",
+        "fromEmail": "={{ $(\"Studio configuration\").first().json.fromEmail }}",
         "toEmail": "={{ $json.email }}",
-        "subject": "={{ \"Beauty Bloom · \" + ($json.kind === \"reminder\" ? \"Напоминание о визите\" : $json.kind === \"rebook\" ? \"Будем рады новой встрече\" : \"Ваша запись\") }}",
+        "subject": "={{ \"[ТЕСТ Beauty Bloom] · \" + ($json.kind === \"reminder\" ? \"Напоминание о визите\" : $json.kind === \"rebook\" ? \"Будем рады новой встрече\" : \"Ваша запись\") }}",
         "emailFormat": "text",
         "text": "={{ $json.message }}",
         "options": {}
@@ -85,28 +101,18 @@
       "name": "Acknowledge success",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [
-        900,
-        -120
-      ],
+      "position": [1120, -120],
       "parameters": {
         "method": "POST",
-        "url": "={{ $vars.BEAUTY_BLOOM_URL + \"/api/integration/ack\" }}",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Authorization",
-              "value": "={{ \"Bearer \" + $vars.BEAUTY_BLOOM_TOKEN }}"
-            }
-          ]
-        },
+        "url": "={{ $(\"Studio configuration\").first().json.crmUrl + \"/api/integration/ack\" }}",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({id: $(\"Split jobs\").item.json.id, lease: $(\"Split jobs\").item.json.lease, success: true}) }}",
         "options": {
           "timeout": 20000
-        }
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
       }
     },
     {
@@ -114,28 +120,18 @@
       "name": "Acknowledge failure",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [
-        900,
-        120
-      ],
+      "position": [1120, 120],
       "parameters": {
         "method": "POST",
-        "url": "={{ $vars.BEAUTY_BLOOM_URL + \"/api/integration/ack\" }}",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Authorization",
-              "value": "={{ \"Bearer \" + $vars.BEAUTY_BLOOM_TOKEN }}"
-            }
-          ]
-        },
+        "url": "={{ $(\"Studio configuration\").first().json.crmUrl + \"/api/integration/ack\" }}",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({id: $(\"Split jobs\").item.json.id, lease: $(\"Split jobs\").item.json.lease, success: false, error: String($json.error?.message || $json.error || \"SMTP delivery failed\").slice(0,500)}) }}",
         "options": {
           "timeout": 20000
-        }
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
       }
     },
     {
@@ -143,29 +139,15 @@
       "name": "Setup instructions",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
-      "position": [
-        0,
-        240
-      ],
+      "position": [0, 330],
       "parameters": {
-        "content": "## Beauty Bloom CRM\n1. Define variables BEAUTY_BLOOM_URL, BEAUTY_BLOOM_TOKEN, BEAUTY_BLOOM_FROM.\n2. Attach your SMTP credential to Send email.\n3. Test with your own controlled inbox, then activate.\nPublic portfolio demo uses fictional data. Do not send to example.com seed contacts.\nTasks have 10-minute leases and max. 5 attempts. SMTP is at-least-once: a crash after delivery but before acknowledgment can duplicate a message. Use an idempotent provider for stronger guarantees.",
-        "height": 250,
-        "width": 650
+        "content": "## Проверка писем Beauty Bloom\n1. Studio configuration: crmUrl и подтверждённый fromEmail.\n2. Header Auth: Authorization = Bearer + пробел + CRM-токен; подключить к трём HTTP-узлам. Секреты сохраняются только в credentials n8n.\n3. Подключить SMTP к Send email. В CRM войти владельцем, включить тестовую очередь и создать запись на разрешённый email с согласием.\n4. Execute workflow: подтвердить получение в своём ящике. Напоминание/повторный визит можно ускорить в CRM кнопкой «Проверить сейчас».\nРасписание выключено. Для постоянной работы проверить тариф/лимит n8n и включить 20 минут: около 2160 запусков за 30 дней, больше лимита 1000 в пробном периоде.\nДемо-контакты не выдаются API. Максимум 5 попыток, резерв 10 минут. SMTP может дублировать письмо при сбое до ACK.",
+        "height": 350,
+        "width": 780
       }
     }
   ],
   "connections": {
-    "Every 5 minutes": {
-      "main": [
-        [
-          {
-            "node": "Claim queued messages",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Claim queued messages": {
       "main": [
         [
@@ -200,6 +182,39 @@
         [
           {
             "node": "Acknowledge failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every 20 minutes": {
+      "main": [
+        [
+          {
+            "node": "Studio configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run test manually": {
+      "main": [
+        [
+          {
+            "node": "Studio configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Studio configuration": {
+      "main": [
+        [
+          {
+            "node": "Claim queued messages",
             "type": "main",
             "index": 0
           }

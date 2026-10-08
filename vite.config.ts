@@ -1,5 +1,5 @@
 import vinext from "vinext";
-import { defineConfig } from "vite";
+import { defineConfig, loadEnv } from "vite";
 import hostingConfig from "./.openai/hosting.json";
 import { readExecutionProfile } from "./scripts/execution-profile.mjs";
 import { sites } from "./build/sites-vite-plugin";
@@ -37,6 +37,10 @@ const localBindingConfig = {
 };
 
 export default defineConfig(async ({ command }) => {
+  const localApplicationEnv =
+    command === "serve"
+      ? loadEnv("development", process.cwd(), "BEAUTY_BLOOM_")
+      : {};
   // Use Miniflare's local Request.cf placeholder unless fetching is requested.
   process.env.CLOUDFLARE_CF_FETCH_ENABLED ??= "false";
   process.env.WRANGLER_SEND_METRICS ??= "false";
@@ -69,6 +73,7 @@ export default defineConfig(async ({ command }) => {
         inspectorPort: false,
         config: {
           ...localBindingConfig,
+          ...(command === "serve" ? { vars: localApplicationEnv } : {}),
           ...(command === "serve"
             ? {
                 services: [

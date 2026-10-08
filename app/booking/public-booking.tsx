@@ -17,6 +17,7 @@ type PublicData = {
   today: string;
   now: number;
   workspaceId: string;
+  testBooking: boolean;
   masters: Master[];
   services: Service[];
   appointments: Appointment[];
@@ -74,8 +75,9 @@ export default function BookingPage() {
           <div className="booking-demo-note">
             <strong>Демонстрационный салон</strong>
             <p>
-              Записи сохраняются в тестовой студии. Используйте вымышленные
-              контакты.
+              {data?.testBooking
+                ? "Включена проверка email на одном разрешённом адресе. Салон и остальные контакты вымышлены."
+                : "Записи сохраняются в тестовой студии. Используйте вымышленные контакты."}
             </p>
           </div>
           <Link href="/" className="text-button">
@@ -102,8 +104,9 @@ export default function BookingPage() {
                 <strong>{money(success.price)}</strong>
               </div>
               <p className="form-hint">
-                Запись появилась в расписании студии. В демо внешние сообщения
-                не отправляются.
+                {data?.testBooking
+                  ? "Запись сохранена. При согласии на уведомления письмо на разрешённый email появится в очереди. Доставку можно проверить после запуска n8n."
+                  : "Запись появилась в расписании студии. В демо внешние сообщения не отправляются."}
               </p>
               <Button
                 variant="outline"
@@ -132,6 +135,7 @@ export default function BookingPage() {
                 today={data.today}
                 now={data.now}
                 publicFlow
+                testBooking={data.testBooking}
                 onSubmit={async (value) => {
                   try {
                     const result = await api<typeof success>(

@@ -8,6 +8,13 @@
       "when": 1791406927697,
       "tag": "0000_grey_apocalypse",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1791449881921,
+      "tag": "0001_last_supernaut",
+      "breakpoints": true
     }
   ]
 }

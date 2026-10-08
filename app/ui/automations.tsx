@@ -66,7 +66,7 @@ const flows = [
 const jobLabels: Record<string, string> = {
   pending: "В очереди",
   processing: "Отправляется",
-  sent: "Отправлено",
+  sent: "Принято почтовым сервисом",
   failed: "Ошибка",
   cancelled: "Отменено",
   skipped: "Нет email или согласия",
@@ -108,6 +108,35 @@ export function Automations() {
         </Button>
       </div>
       <ErrorText error={error} />
+      {data.settings.testAvailable && (
+        <section className="automation-notice">
+          <div>
+            <BellRing size={22} />
+            <span>
+              <strong>Тестовая отправка на настоящую почту</strong>
+              <p>
+                Адрес: {data.settings.testEmail}. n8n получит только новые
+                задачи для этого адреса с согласием на уведомления.
+                Демонстрационные контакты не участвуют.
+              </p>
+            </span>
+          </div>
+          <Switch
+            aria-label="Тестовая отправка на настоящую почту"
+            checked={data.settings.deliveryMode === "test"}
+            disabled={busy}
+            onCheckedChange={(enabled) => {
+              void perform(
+                "automation/test-mode",
+                { enabled },
+                enabled
+                  ? "Тестовая очередь включена. Создайте запись с разрешённым email."
+                  : "Тестовая очередь приостановлена",
+              );
+            }}
+          />
+        </section>
+      )}
       <div className="automation-cards">
         {flows.map(({ key, icon: Icon, title, when, description }) => (
           <section className="automation-card" key={key}>
@@ -152,7 +181,7 @@ export function Automations() {
         </div>
         <Button
           variant="outline"
-          disabled={busy}
+          disabled={busy || data.settings.deliveryMode === "test"}
           onClick={() => {
             void perform(
               "automation/demo",
@@ -203,6 +232,28 @@ export function Automations() {
                       ? "Приостановлено"
                       : (jobLabels[j.status] ?? j.status)}
                   </span>
+                  {data.settings.testAvailable &&
+                    data.settings.deliveryMode === "test" &&
+                    j.email?.toLowerCase() === data.settings.testEmail &&
+                    j.created_at >= (data.settings.testStartedAt ?? Infinity) &&
+                    j.kind !== "confirmation" &&
+                    j.attempts < 5 &&
+                    ["pending", "failed"].includes(j.status) && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={busy}
+                        onClick={() => {
+                          void perform(
+                            "automation/test-ready",
+                            { id: j.id },
+                            "Задача готова для ручного запуска n8n",
+                          );
+                        }}
+                      >
+                        Проверить сейчас
+                      </Button>
+                    )}
                 </TableCell>
               </TableRow>
             ))}
@@ -232,14 +283,24 @@ export function Automations() {
           <DialogHeader>
             <DialogTitle>Подключение автоматизаций</DialogTitle>
             <DialogDescription>
-              n8n забирает задачи каждые 5 минут и отправляет письма через ваш
-              SMTP.
+              Сначала проверьте ручной запуск n8n и доставку через SMTP. В
+              шаблоне расписание выключено.
             </DialogDescription>
           </DialogHeader>
           <ol className="setup-steps">
             <li>Скачайте и импортируйте шаблон в n8n.</li>
-            <li>Задайте переменные BEAUTY_BLOOM_URL и BEAUTY_BLOOM_TOKEN.</li>
-            <li>Подключите SMTP к узлу «Send email» и включите сценарий.</li>
+            <li>
+              В «Studio configuration» укажите адрес CRM и подтверждённого
+              отправителя.
+            </li>
+            <li>
+              Сохраните токен в Header Auth: Authorization = Bearer + пробел +
+              токен. Подключите credential к трём HTTP-узлам.
+            </li>
+            <li>
+              Подключите SMTP к «Send email». Включите тестовую очередь и
+              запустите сценарий вручную.
+            </li>
           </ol>
           <p className="form-hint">
             Адрес приложения:{" "}

@@ -103,6 +103,7 @@ export function AppointmentForm({
   initialMaster,
   onSubmit,
   publicFlow = false,
+  testBooking = false,
   moving,
 }: {
   masters: Master[];
@@ -118,6 +119,7 @@ export function AppointmentForm({
   initialMaster?: string;
   onSubmit: (value: unknown) => Promise<void>;
   publicFlow?: boolean;
+  testBooking?: boolean;
   moving?: Appointment;
 }) {
   const [clientMode, setClientMode] = useState(publicFlow ? "new" : "existing"),
@@ -282,8 +284,9 @@ export function AppointmentForm({
       )}
       {publicFlow && (
         <p className="form-hint">
-          Это демо для портфолио. Используйте вымышленные контакты и email с
-          окончанием @example.com.
+          {testBooking
+            ? "В студии включена проверка писем. Для доставки используйте разрешённый владельцем тестовый email и отметьте согласие. Остальные контакты — вымышленные, с email @example.com."
+            : "Это демо для портфолио. Используйте вымышленные контакты и email с окончанием @example.com."}
         </p>
       )}
       <ErrorText error={error} />

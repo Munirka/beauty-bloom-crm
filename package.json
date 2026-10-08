@@ -13,7 +13,7 @@
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate",
     "typecheck": "tsc --noEmit",
-    "db:migrate:local": "node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0000_grey_apocalypse.sql"
+    "db:migrate:local": "node scripts/migrate-local.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

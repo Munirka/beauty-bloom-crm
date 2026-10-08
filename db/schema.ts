@@ -15,6 +15,8 @@ export const workspaces = sqliteTable(
     reminder: integer("reminder").notNull().default(1),
     rebook: integer("rebook").notNull().default(1),
     integrationHash: text("integration_hash"),
+    deliveryMode: text("delivery_mode").notNull().default("demo"),
+    testStartedAt: integer("test_started_at"),
   },
   (t) => [uniqueIndex("workspaces_owner").on(t.owner)],
 );
